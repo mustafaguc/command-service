@@ -1,8 +1,8 @@
 package com.powersoft.commandservice.service
 
 import com.powersoft.commandservice.model.Command
-import com.powersoft.commandservice.model.CommandLog
 import com.powersoft.commandservice.model.CommandStatus
+import com.powersoft.commandservice.model.CommandLog
 import com.powersoft.commandservice.util.CommandValidator
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -63,7 +63,6 @@ class CommandExecutorService(private val commandValidator: CommandValidator) {
             commandIndex = commandIndex,
             command = command,
             output = "Command rejected: Potentially harmful command",
-            exitCode = -2, // Special exit code for harmful commands
             status = CommandStatus.HARMFUL,
             startTime = startTime,
             endTime = LocalDateTime.now()
@@ -167,8 +166,7 @@ class CommandExecutorService(private val commandValidator: CommandValidator) {
             commandIndex = commandIndex,
             command = command,
             output = output,
-            exitCode = exitCode,
-            status = CommandStatus.SUCCESS,
+            status = CommandStatus.fromCode(exitCode),
             startTime = startTime,
             endTime = endTime
         )
@@ -192,8 +190,7 @@ class CommandExecutorService(private val commandValidator: CommandValidator) {
             commandIndex = commandIndex,
             command = command,
             output = "Error executing command: ${exception.message}",
-            exitCode = -1,
-            status = CommandStatus.FAILED,
+            status = CommandStatus.ERROR,
             startTime = startTime,
             endTime = endTime
         )

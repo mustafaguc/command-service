@@ -1,7 +1,9 @@
 package com.powersoft.commandservice.repository
 
+import com.powersoft.commandservice.model.CommandStatus
 import com.powersoft.commandservice.model.CommandLog
 import com.powersoft.commandservice.model.Job
+import com.powersoft.commandservice.model.isRunning
 import java.util.concurrent.ConcurrentHashMap
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Repository
@@ -45,10 +47,10 @@ class InMemoryJobRepository : JobRepository {
         val jobLogs = logs.computeIfAbsent(log.jobId) { mutableListOf() }
         
         // Check if this is a partial log update (exitCode == -999 indicates a running command)
-        if (log.exitCode == -999) {
+        if (log.isRunning()) {
             // Find and replace any existing partial log for this command index
             val existingLogIndex = jobLogs.indexOfFirst {
-                it.commandIndex == log.commandIndex && it.exitCode == -999
+                it.commandIndex == log.commandIndex && it.isRunning()
             }
             
             if (existingLogIndex >= 0) {

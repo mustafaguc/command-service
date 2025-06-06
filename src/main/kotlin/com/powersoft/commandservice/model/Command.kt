@@ -43,13 +43,24 @@ enum class JobStatus {
  */
 @Schema(description = "Log entry for a command execution")
 /**
- * Status of a command execution
+ * Exit codes for command execution
  */
-enum class CommandStatus {
-    SUCCESS,      // Command executed successfully
-    FAILED,       // Command failed during execution
-    HARMFUL,      // Command was rejected as potentially harmful
-    RUNNING       // Command is still running
+enum class CommandStatus(val code: Int) {
+    SUCCESS(0),           // Command executed successfully
+    ERROR(-1),            // General error during execution
+    HARMFUL(-2),          // Command was rejected as potentially harmful
+    RUNNING(-999);        // Command is still running
+
+    companion object {
+        fun fromCode(code: Int): CommandStatus {
+            return CommandStatus.entries.find { it.code == code } ?: when {
+                code == 0 -> SUCCESS
+                code == -2 -> HARMFUL
+                code == -999 -> RUNNING
+                else -> ERROR
+            }
+        }
+    }
 }
 
 /**
@@ -61,22 +72,15 @@ data class CommandLog(
     val commandIndex: Int,
     val command: Command,
     val output: String,
-    val exitCode: Int,
-    val status: CommandStatus? = null,
+    val status: CommandStatus,
     val startTime: LocalDateTime,
     val endTime: LocalDateTime
-) {
-    /**
-     * Gets the effective status of the command, either from the status field or computed from the exit code
-     */
-    val effectiveStatus: CommandStatus
-        get() = status ?: when (exitCode) {
-            0 -> CommandStatus.SUCCESS
-            -2 -> CommandStatus.HARMFUL
-            -999 -> CommandStatus.RUNNING
-            else -> CommandStatus.FAILED
-        }
-}
+)
+
+fun CommandLog.isRunning() = status == CommandStatus.RUNNING
+fun CommandLog.isFailed() = status == CommandStatus.ERROR
+fun CommandLog.isSuccessful() = status == CommandStatus.SUCCESS
+fun CommandLog.isHarmful() = status == CommandStatus.HARMFUL
 
 
 /**
@@ -123,9 +127,9 @@ data class JobSummary(
         fun fromLogs(logs: List<CommandLog>): JobSummary {
             return JobSummary(
                 totalCommands = logs.size,
-                successfulCommands = logs.count { it.effectiveStatus == CommandStatus.SUCCESS },
-                failedCommands = logs.count { it.effectiveStatus == CommandStatus.FAILED },
-                skippedHarmfulCommands = logs.count { it.effectiveStatus == CommandStatus.HARMFUL }
+                successfulCommands = logs.count(CommandLog::isSuccessful),
+                failedCommands = logs.count(CommandLog::isFailed),
+                skippedHarmfulCommands = logs.count(CommandLog::isHarmful)
             )
         }
     }
