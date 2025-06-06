@@ -3,6 +3,7 @@ package com.powersoft.commandservice.repository
 import com.powersoft.commandservice.model.CommandLog
 import com.powersoft.commandservice.model.Job
 import java.util.concurrent.ConcurrentHashMap
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Repository
 
 /**
@@ -21,6 +22,7 @@ interface JobRepository {
  */
 @Repository
 class InMemoryJobRepository : JobRepository {
+    private val logger = LoggerFactory.getLogger(InMemoryJobRepository::class.java)
     private val jobs = ConcurrentHashMap<String, Job>()
     private val logs = ConcurrentHashMap<String, MutableList<CommandLog>>()
 
@@ -39,10 +41,32 @@ class InMemoryJobRepository : JobRepository {
     }
 
     override fun saveLog(log: CommandLog) {
-        logs.computeIfAbsent(log.jobId) { mutableListOf() }.add(log)
+        // Get or create the log list for this job
+        val jobLogs = logs.computeIfAbsent(log.jobId) { mutableListOf() }
+        
+        // Check if this is a partial log update (exitCode == -999 indicates a running command)
+        if (log.exitCode == -999) {
+            // Find and replace any existing partial log for this command index
+            val existingLogIndex = jobLogs.indexOfFirst {
+                it.commandIndex == log.commandIndex && it.exitCode == -999
+            }
+            
+            if (existingLogIndex >= 0) {
+                jobLogs[existingLogIndex] = log
+            } else {
+                jobLogs.add(log)
+            }
+        } else {
+            // This is a final log, replace any partial log for this command index
+            val existingLogIndex = jobLogs.indexOfFirst { it.commandIndex == log.commandIndex }
+            
+            if (existingLogIndex >= 0) {
+                jobLogs[existingLogIndex] = log
+            } else {
+                jobLogs.add(log)
+            }
+        }
     }
 
-    override fun findLogsByJobId(jobId: String): List<CommandLog> {
-        return logs[jobId]?.toList() ?: emptyList()
-    }
+    override fun findLogsByJobId(jobId: String) = logs[jobId]?.toList() ?: emptyList()
 }

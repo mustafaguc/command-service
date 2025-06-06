@@ -60,7 +60,57 @@ class JobService(
      * @return The logs for the job
      */
     fun getJobLogs(jobId: String): List<CommandLog> {
-        return jobRepository.findLogsByJobId(jobId)
+        val logs = jobRepository.findLogsByJobId(jobId)
+        logger.info("Retrieved ${logs.size} logs for job $jobId")
+        
+        // If no logs were found, log a warning
+        if (logs.isEmpty()) {
+            logger.warn("No logs found for job $jobId")
+        } else {
+            // Log the first few logs for debugging
+            logs.take(2).forEachIndexed { index, log ->
+                logger.debug("Log $index for job $jobId: command=${log.command.command}, exitCode=${log.exitCode}, outputLength=${log.output.length}")
+            }
+        }
+        
+        return logs
+    }
+    
+    /**
+     * Cancels a job by its ID
+     * @param jobId The job ID
+     * @return The cancelled job, or null if not found or already completed
+     */
+    fun cancelJob(jobId: String): Job? {
+        val job = jobRepository.findById(jobId) ?: return null
+        
+        // Check if the job can be cancelled (only PENDING or RUNNING jobs can be cancelled)
+        if (job.status != JobStatus.PENDING && job.status != JobStatus.RUNNING) {
+            logger.warn("Cannot cancel job $jobId with status ${job.status}")
+            return null
+        }
+        
+        // Cancel all running processes for this job
+        val processesCancelled = commandExecutorService.cancelJob(jobId)
+        
+        // Update job status to CANCELLED
+        val cancelledJob = job.copy(
+            status = JobStatus.CANCELLED,
+            completedAt = LocalDateTime.now()
+        )
+        jobRepository.update(cancelledJob)
+        
+        // Log the cancellation
+        if (processesCancelled) {
+            logger.info("Job $jobId cancelled with running processes terminated")
+        } else {
+            logger.info("Job $jobId cancelled, no running processes found")
+        }
+        
+        // Call webhook if provided
+        job.webhookUrl?.let { callWebhook(cancelledJob) }
+        
+        return cancelledJob
     }
 
     /**
@@ -78,8 +128,37 @@ class JobService(
             
             // Execute each command sequentially
             for ((index, command) in job.commands.withIndex()) {
-                val log = commandExecutorService.executeCommand(job.id, index, command)
+                // Create a partial log with empty output to start with
+                val startTime = LocalDateTime.now()
+                val currentOutput = StringBuilder()
+                
+                // Create a callback to handle streaming output
+                val outputCallback = { line: String ->
+                    // Append the new line to our current output
+                    currentOutput.append(line).append("\n")
+                    
+                    // Create a partial log with the current output
+                    val partialLog = CommandLog(
+                        jobId = job.id,
+                        commandIndex = index,
+                        command = command,
+                        output = currentOutput.toString(),
+                        exitCode = -999, // Special code indicating command is still running
+                        startTime = startTime,
+                        endTime = LocalDateTime.now() // Current time as temporary end time
+                    )
+                    
+                    // Save the partial log
+                    jobRepository.saveLog(partialLog)
+                }
+                
+                // Execute the command with the streaming callback
+                val log = commandExecutorService.executeCommand(job.id, index, command, outputCallback)
+                
+                // Save the final log
+                logger.info("Saving final log for job ${job.id}, command index $index: ${command.command}")
                 jobRepository.saveLog(log)
+                logger.debug("Log saved for job ${job.id}, command index $index, output length: ${log.output.length}")
                 
                 // If the command failed, stop execution
                 if (log.exitCode != 0) {
