@@ -1,6 +1,7 @@
 package com.powersoft.commandservice.service
 
 import com.powersoft.commandservice.model.*
+import com.powersoft.commandservice.model.CommandStatus
 import com.powersoft.commandservice.repository.JobRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -144,6 +145,7 @@ class JobService(
                         command = command,
                         output = currentOutput.toString(),
                         exitCode = -999, // Special code indicating command is still running
+                        status = CommandStatus.RUNNING,
                         startTime = startTime,
                         endTime = LocalDateTime.now() // Current time as temporary end time
                     )
@@ -160,22 +162,33 @@ class JobService(
                 jobRepository.saveLog(log)
                 logger.debug("Log saved for job ${job.id}, command index $index, output length: ${log.output.length}")
                 
-                // If the command failed, stop execution
-                if (log.exitCode != 0) {
-                    val failedJob = startedJob.copy(
-                        status = JobStatus.FAILED,
-                        completedAt = LocalDateTime.now()
-                    )
-                    jobRepository.update(failedJob)
-                    
-                    // Call webhook if provided
-                    job.webhookUrl?.let { callWebhook(failedJob) }
-                    
-                    return
+                // Check the command status
+                when (log.effectiveStatus) {
+                    CommandStatus.SUCCESS -> {
+                        // Command executed successfully, continue to next command
+                        logger.info("Command executed successfully: ${command.command}")
+                    }
+                    CommandStatus.HARMFUL -> {
+                        // Command was rejected as harmful, but we continue execution
+                        logger.warn("Harmful command skipped, continuing with next command: ${command.command}")
+                    }
+                    else -> {
+                        // Command failed for other reasons, stop execution
+                        val failedJob = startedJob.copy(
+                            status = JobStatus.FAILED,
+                            completedAt = LocalDateTime.now()
+                        )
+                        jobRepository.update(failedJob)
+                        
+                        // Call webhook if provided
+                        job.webhookUrl?.let { callWebhook(failedJob) }
+                        
+                        return
+                    }
                 }
             }
             
-            // All commands executed successfully
+            // All commands executed successfully or were skipped as harmful
             val completedJob = startedJob.copy(
                 status = JobStatus.COMPLETED,
                 completedAt = LocalDateTime.now()

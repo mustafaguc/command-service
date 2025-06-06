@@ -52,7 +52,6 @@ class CommandController(private val jobService: JobService) {
      */
     @DeleteMapping("/{jobId}")
     fun cancelJob(
-        @Parameter(description = "ID of the job to cancel", required = true)
-        @PathVariable jobId: String
+        @Parameter(description = "ID of the job to cancel", required = true) @PathVariable jobId: String
     ) = jobService.cancelJob(jobId)?.let { ResponseEntity.ok(it) } ?: ResponseEntity.notFound().build()
 }
